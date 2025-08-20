@@ -20,42 +20,44 @@ try {
     die("Error de conexión: " . $e->getMessage());
 }
 
-// ---------------- FUNCIONES ---------------- //
-
-/**
- * Registra un usuario con contraseña en hash
- */
+// --------- FUNCIONES --------- //
 function registerUser(PDO $pdo, string $usuario, string $password): string {
-    // Generar hash seguro
-    $hash = password_hash($password, PASSWORD_DEFAULT);
+    // Evita registrar duplicado si re-ejecutas el archivo
+    $q = $pdo->prepare("SELECT 1 FROM usuario WHERE usuario=:u LIMIT 1");
+    $q->execute([':u'=>$usuario]);
+    if ($q->fetch()) return "Usuario ya existe, no se vuelve a registrar.";
 
-    try {
-        $stmt = $pdo->prepare("INSERT INTO usuario (usuario, contrasena) VALUES (:usuario, :hash)");
-        $stmt->execute([":usuario" => $usuario, ":hash" => $hash]);
-        return "Usuario registrado correctamente";
-    } catch (PDOException $e) {
-        return "Error: " . $e->getMessage();
-    }
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+    $stmt = $pdo->prepare("INSERT INTO usuario (usuario, contrasena) VALUES (:u, :h)");
+    $stmt->execute([':u'=>$usuario, ':h'=>$hash]);
+    return "Usuario registrado correctamente";
 }
 
-/**
- * Autentica al usuario verificando el hash
- */
 function loginUser(PDO $pdo, string $usuario, string $password): string {
-    $stmt = $pdo->prepare("SELECT contrasena FROM usuario WHERE usuario = :usuario LIMIT 1");
-    $stmt->execute([":usuario" => $usuario]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare("SELECT idusuario, contrasena FROM usuario WHERE usuario=:u LIMIT 1");
+    $stmt->execute([':u'=>$usuario]);
+    $row = $stmt->fetch();
+    if(!$row || empty($row['contrasena'])) return "❌ Credenciales inválidas";
 
-    if ($user && password_verify($password, $user['contrasena'])) {
+    // rtrim por si la columna fue CHAR o hubo copy/paste con salto de línea
+    $hash = rtrim($row['contrasena']);
+
+    if (password_verify($password, $hash)) {
+        // Opcional: rehash si el algoritmo por defecto cambió
+        if (password_needs_rehash($hash, PASSWORD_DEFAULT)) {
+            $new = password_hash($password, PASSWORD_DEFAULT);
+            $upd = $pdo->prepare("UPDATE usuario SET contrasena=:h WHERE idusuario=:id");
+            $upd->execute([':h'=>$new, ':id'=>$row['idusuario']]);
+        }
         return "✅ Inicio de sesión exitoso";
     }
     return "❌ Credenciales inválidas";
 }
 
-// ---------------- DEMO ---------------- //
-// Ejemplo de uso:
-echo registerUser($pdo, "VanessaNasimba", "Vane12344@");
-echo "<br>";
-echo loginUser($pdo, "VanessaNasimba", "Vane12344@");  // correcto
-echo "<br>";
-echo loginUser($pdo, "VanessaNasimba", "Vane12344"); // incorrecto
+// --------- DEMO --------- //
+// Ejecuta UNA sola vez el registro; en siguientes corridas no reinsertará:
+echo registerUser($pdo, "VanessaMedina", "Vane12344"), 
+"<br>";
+echo loginUser($pdo, "VanessaMedina", "Vane12344"), 
+"<br>";   
+echo loginUser($pdo, "VanessaMedina", "Vane1234");    
